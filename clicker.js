@@ -234,7 +234,7 @@ async function visitExternalSiteWithArticle(page, label) {
   const site = BROWSE_SITES[rand(0, BROWSE_SITES.length - 1)];
   try {
     console.log(`[${label}] browsing external site:`, site);
-    await page.goto(site, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await page.goto(site, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await readPage(page, `${label}-landing`, 20, 30);
     try {
       const links = await page.$$eval('a[href]', els =>
@@ -243,7 +243,7 @@ async function visitExternalSiteWithArticle(page, label) {
       if (links.length) {
         const pick = links[rand(0, links.length - 1)];
         console.log(`[${label}] clicking article:`, pick);
-        await page.goto(pick, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.goto(pick, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await readPage(page, `${label}-article`, 15, 20);
       }
     } catch (e) {
@@ -258,6 +258,20 @@ async function visitExternalSiteWithArticle(page, label) {
   }
 }
 
+// Determine if a proxy error is a HARD failure (dead) vs soft (slow but alive)
+function isHardProxyFailure(errMsg) {
+  const hard = [
+    'ERR_PROXY_AUTH',
+    'ERR_TUNNEL_CONNECTION_FAILED',
+    'ERR_CONNECTION_REFUSED',
+    'ERR_NAME_NOT_RESOLVED',
+    'ERR_INVALID_AUTH_CREDENTIALS',
+    'ERR_SOCKS_CONNECTION_FAILED',
+    '407'
+  ];
+  return hard.some(h => errMsg.includes(h));
+}
+
 async function tryProxy(browser, proxyObj, ua, referer, viewport) {
   try {
     const context = await browser.newContext({
@@ -267,12 +281,15 @@ async function tryProxy(browser, proxyObj, ua, referer, viewport) {
     });
     const page = await context.newPage();
     await applyDataSaver(page);
-    await page.goto('https://api.ipify.org?format=json', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    // 60s timeout — gives far/slow proxies a fair chance
+    await page.goto('https://api.ipify.org?format=json', { waitUntil: 'domcontentloaded', timeout: 60000 });
     const body = await page.textContent('body');
     console.log(`DIAG: proxy ${proxyObj.label} OK, exit IP =`, body.trim());
     return { context, page };
   } catch (e) {
-    console.log(`DIAG: proxy ${proxyObj.label} FAILED:`, e.message.split('\n')[0]);
+    const msg = e.message.split('\n')[0];
+    const hard = isHardProxyFailure(msg);
+    console.log(`DIAG: proxy ${proxyObj.label} FAILED (${hard ? 'HARD/DEAD' : 'soft/timeout'}):`, msg);
     return null;
   }
 }
@@ -288,7 +305,7 @@ async function pickWorkingProxy(browser, ua, referer, viewport, targetUrl) {
     const result = await tryProxy(browser, proxyObj, ua, referer, viewport);
     if (!result) { lastError = 'proxy unreachable'; continue; }
     try {
-      await result.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      await result.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
       console.log('DIAG: home url =', result.page.url());
       if (result.page.url().includes('google.com/sorry')) {
         console.log('DIAG: CAPTCHA on this proxy, trying next');
@@ -367,7 +384,6 @@ async function pickWorkingProxy(browser, ua, referer, viewport, targetUrl) {
 
   const result = await pickWorkingProxy(browser, randomUA, randomReferer, viewport, process.env.SITE_URL);
   if (!result) {
-    // pickWorkingProxy already printed the big warning block
     await browser.close();
     process.exit(1);
   }
@@ -393,7 +409,7 @@ async function pickWorkingProxy(browser, ua, referer, viewport, targetUrl) {
 
   console.log('--- STEP 2: target site home ---');
   try {
-    await page.goto(process.env.SITE_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await page.goto(process.env.SITE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await readPage(page, 'target-home', 30, 45);
   } catch (e) {
     console.log('homepage goto failed:', e.message.split('\n')[0]);
@@ -415,7 +431,7 @@ async function pickWorkingProxy(browser, ua, referer, viewport, targetUrl) {
     console.log(`--- article ${i + 1}/${articlesToRead} ---`);
     console.log('reading:', url);
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     } catch (e) {
       console.log('article goto failed:', e.message.split('\n')[0]);
       try { await page.goto('about:blank', { timeout: 5000 }).catch(() => {}); } catch (_) {}
@@ -433,7 +449,7 @@ async function pickWorkingProxy(browser, ua, referer, viewport, targetUrl) {
     await tryReachAdQuota(`article-${i + 1}`);
     await sleep(rand(15000, 30000));
     try {
-      await page.goto(process.env.SITE_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      await page.goto(process.env.SITE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await readPage(page, 'back-home', 20, 30);
       await tryReachAdQuota(`home-after-article-${i + 1}`);
     } catch (e) {
